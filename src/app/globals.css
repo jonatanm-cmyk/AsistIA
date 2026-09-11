@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Roles de gráfico. Los componentes de charts se escriben contra estos
+       nombres, no contra hex sueltos, para que cambiar la paleta sea un solo
+       sitio. Los valores salen de una paleta validada para contraste y
+       daltonismo: no los sustituyas a ojo. */
+    --surface-1: #ffffff;
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-muted: #64748b;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --series-3: #1baf7a;
+    --series-4: #eda100;
+
+    --status-good: #0ca30c;
+    --status-warning: #fab219;
+    --status-serious: #ec835a;
+    --status-critical: #d03b3b;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    @apply bg-surface-muted text-ink;
+  }
+
+  /* Foco visible y consistente: se pierde con facilidad al estilar botones. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand-500 ring-offset-2 ring-offset-white;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-slate-200 bg-white shadow-soft;
+  }
+
+  .card-pad {
+    @apply p-5;
+  }
+
+  .label {
+    @apply mb-1.5 block text-sm font-medium text-ink-muted;
+  }
+
+  .input {
+    @apply w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-ink
+           placeholder:text-ink-faint focus:border-brand-500 focus:outline-none
+           focus:ring-2 focus:ring-brand-100 disabled:bg-slate-50 disabled:text-ink-faint;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm
+           font-semibold transition disabled:cursor-not-allowed disabled:opacity-60;
+  }
+  .btn-primary {
+    @apply btn bg-brand-600 text-white hover:bg-brand-700;
+  }
+  .btn-secondary {
+    @apply btn border border-slate-300 bg-white text-ink hover:bg-slate-50;
+  }
+  .btn-danger {
+    @apply btn bg-status-critical text-white hover:brightness-95;
+  }
+  .btn-ghost {
+    @apply btn text-ink-muted hover:bg-slate-100 hover:text-ink;
+  }
+
+  .th {
+    @apply whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase
+           tracking-wider text-ink-faint;
+  }
+  .td {
+    @apply px-4 py-3 align-middle text-sm text-ink;
+  }
+
+  /* Números que se leen en columna: las cifras alineadas verticalmente. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
