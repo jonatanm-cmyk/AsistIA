@@ -6,7 +6,7 @@ import { z } from "zod";
 import { requireEmpresa, tenantDe } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
 import { registrarDocumento, retirarDocumento } from "@/lib/queries/conocimiento";
-import { ErrorExtraccion, extraerTexto } from "@/lib/extraer-texto";
+import { ErrorExtraccion, extraerTexto, limpiarTexto } from "@/lib/extraer-texto";
 import { avisarIngesta, explicarAviso } from "@/lib/ingesta";
 
 export type ResultadoAccion = { ok: true; mensaje: string } | { ok: false; error: string };
@@ -53,9 +53,12 @@ export async function subirDocumento(
   try {
     // --- Texto pegado: ya viene extraído --------------------------------
     if (modo === "texto") {
+      // Se limpia ANTES de validar, no después: así un pegado que solo traiga
+      // caracteres de control falla por "demasiado corto", que es verdad y se
+      // entiende, en vez de pasar la validación y reventar en el `insert`.
       const parseado = esquemaTexto.safeParse({
-        nombre: formData.get("nombre"),
-        contenido: formData.get("contenido"),
+        nombre: limpiarTexto(String(formData.get("nombre") ?? "")),
+        contenido: limpiarTexto(String(formData.get("contenido") ?? "")),
       });
       if (!parseado.success) {
         return { ok: false, error: parseado.error.issues[0]!.message };
@@ -125,7 +128,9 @@ export async function subirDocumento(
     // 3. Registrar y avisar.
     const doc = await registrarDocumento(t, {
       empresaId: sesion.empresaId,
-      nombre: archivo.name,
+      // El nombre viene del sistema de archivos de quien sube: también acaba en
+      // una columna `text` y también puede traer sorpresas.
+      nombre: limpiarTexto(archivo.name),
       tipo,
       storagePath: ruta,
       textoExtraido: texto,

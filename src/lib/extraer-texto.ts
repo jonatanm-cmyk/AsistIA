@@ -46,7 +46,7 @@ export async function extraerTexto(
 ): Promise<TextoExtraido> {
   const resultado = tipo === "PDF" ? await dePdf(bytes) : await deDocx(bytes);
 
-  const texto = normalizar(resultado.texto);
+  const texto = limpiarTexto(resultado.texto);
 
   if (texto.length < MINIMO_CARACTERES) {
     throw new ErrorExtraccion(
@@ -93,20 +93,47 @@ async function deDocx(bytes: Buffer): Promise<TextoExtraido> {
 }
 
 /**
- * Limpieza mínima antes de guardar.
+ * Limpieza antes de guardar.
  *
- * No es cosmética: los saltos de página y las rachas de espacios que dejan los
- * extractores se convierten en tokens que se pagan en cada embedding y en cada
- * prompt, sin aportar nada.
+ * DOS COSAS DISTINTAS, Y LA PRIMERA NO ES COSMÉTICA
+ *
+ * 1. QUITAR EL BYTE NULO. Postgres no admite `0x00` dentro de una columna
+ *    `text`: es el único carácter UTF-8 válido que rechaza, y protesta con
+ *
+ *        22021  invalid byte sequence for encoding "UTF8": 0x00
+ *
+ *    Hay PDF que lo traen —fuentes incrustadas, campos de formulario, texto
+ *    escrito por herramientas que usan cadenas terminadas en nulo— y el
+ *    extractor lo pasa tal cual. Reventaba el `insert` ENTERO, así que el
+ *    documento no se guardaba y el usuario solo veía "no se pudo registrar el
+ *    documento", sin ninguna pista de por qué. Ocurrió en producción el
+ *    14-sep-2026.
+ *
+ *    Se quita, no se sustituye: un nulo no representa nada que nadie quisiera
+ *    leer.
+ *
+ * 2. El resto sí es ahorro: los saltos de página y las rachas de espacios que
+ *    dejan los extractores se convierten en tokens que se pagan en cada
+ *    embedding y en cada prompt, sin aportar nada.
+ *
+ * EL ORDEN IMPORTA. `\r` y `\f` se traducen a saltos de línea ANTES de barrer
+ * los caracteres de control. Si se barrieran primero, un salto de página se
+ * perdería en vez de convertirse en la separación que sí significa algo.
  */
-function normalizar(texto: string): string {
-  return texto
-    .replace(/\r\n?/g, "\n")
-    .replace(/\f/g, "\n")
-    .replace(/[ \t]+/g, " ")
-    .replace(/ ?\n ?/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+export function limpiarTexto(texto: string): string {
+  return (
+    texto
+      .replace(/\r\n?/g, "\n")
+      .replace(/\f/g, "\n")
+      // Controles C0 y DEL, salvo salto de línea y tabulador. El `\x00` es el
+      // que rompe Postgres; los demás son ruido que el modelo pagaría igual.
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\x00-\x08\x0B\x0E-\x1F\x7F]/g, "")
+      .replace(/[ \t]+/g, " ")
+      .replace(/ ?\n ?/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  );
 }
 
 function mensajeCorto(error: unknown): string {
