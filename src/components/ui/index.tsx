@@ -182,8 +182,16 @@ export function Alerta({
 }
 
 /** Marcador de carga. Lo usan los `loading.tsx` y los `fallback` de Suspense. */
-export function Skeleton({ className }: { className?: string }) {
-  return <div className={clsx("animate-pulse rounded-lg bg-slate-200/70", className)} />;
+export function Skeleton({
+  className,
+  style,
+}: {
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <div className={clsx("animate-pulse rounded-lg bg-slate-200/70", className)} style={style} />
+  );
 }
 
 export function SkeletonTarjeta() {

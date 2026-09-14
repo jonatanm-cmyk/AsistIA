@@ -229,3 +229,15 @@ export interface Sesion {
 }
 
 export const esIntersim = (s: Pick<Sesion, "rol">): boolean => s.rol === "INTERSIM";
+
+/**
+ * Tope del texto del botón «Probar» de la configuración del agente.
+ *
+ * No es un límite del flujo `asi-20-probar`, que acepta lo que le manden: es
+ * sentido común nuestro, una pregunta de prueba no es un documento.
+ *
+ * Vive aquí por lo mismo que `TONOS_SUGERIDOS`: lo necesitan el `maxLength` del
+ * textarea (cliente) y la validación de la Server Action (servidor), y el
+ * módulo donde se usa de verdad es server-only.
+ */
+export const MAX_CARACTERES_PRUEBA = 500;

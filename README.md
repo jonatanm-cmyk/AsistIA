@@ -155,17 +155,30 @@ Al subir un PDF o un DOCX, el panel hace **tres cosas en este orden**:
 3. Registra la fila en `PENDIENTE` y avisa al webhook de ingesta.
 
 **El paso 1 no es opcional**: el flujo `ASI_10_INGESTA` lee `texto_extraido` y
-**nunca descarga de Storage** — se comprueba leyendo el cuerpo de
-`fn_ingesta_tomar`, que devuelve esa columna y no menciona `storage_path`. Es
-el supuesto `S4`. Sin ese paso, el documento entra en cola y no produce ni un
-fragmento.
+el supuesto `S4`, y se comprueba leyendo el cuerpo de `fn_ingesta_tomar`, que
+devuelve esa columna. Desde el 13-sep-2026 el flujo **también** sabe bajarse el
+original de Storage y extraerlo él, así que hay dos caminos válidos; seguimos
+usando `texto_extraido` porque es el que está probado de punta a punta.
 
 Va primero a propósito: si el PDF es un escaneo sin OCR, la extracción falla y
 se le dice al usuario **antes** de subir 20 MB que no servirían de nada.
 
 El aviso al flujo (contrato 1) usa `ASI_INGESTA_WEBHOOK_URL` y
-`ASI_INGESTA_TOKEN`. **Las dos pueden quedar vacías**: el documento se guarda
-igual en `PENDIENTE` y el flujo lo recogerá cuando exista.
+`ASI_WEBHOOK_TOKEN`. **Pueden quedar vacías**: el documento se guarda igual en
+`PENDIENTE` y el flujo lo recogerá cuando exista. El cuerpo es
+`{ empresa_id, documento_id, evento: "INGESTAR" }` — `evento` no admite ningún
+otro valor, cualquier otra cosa devuelve `400`.
+
+### Probar el agente (contrato 2)
+
+El botón **Probar** de `/agente` llama a `ASI_PROBAR_WEBHOOK_URL` con el mismo
+token y espera la respuesta (3-7 s). Corre en modo prueba: no escribe, no usa
+memoria y no cuenta contra el tope diario.
+
+Prueba **la versión guardada**, no lo que hay escrito en el formulario: el
+flujo arma el prompt leyendo la configuración vigente en la base. La pantalla lo
+dice y muestra qué versión está probando, porque no hay forma de deducirlo
+mirando la respuesta.
 
 Pegar texto funciona sin bucket y sin extracción.
 

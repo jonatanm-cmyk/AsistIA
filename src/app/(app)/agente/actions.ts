@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireEmpresa, tenantDe } from "@/lib/session";
 import { guardarConfiguracion, obtenerVersion } from "@/lib/queries/agente";
-import { TIPOS_REGLA } from "@/types/asistia";
+import { MAX_CARACTERES_PRUEBA, TIPOS_REGLA } from "@/types/asistia";
+import { probarAgente, type ResultadoPrueba } from "@/lib/probar-agente";
 
 /**
  * Server Actions: este archivo ES el backend de la vista.
@@ -144,5 +145,55 @@ export async function restaurarVersion(
   } catch (error) {
     console.error("[agente] restaurar", error);
     return { ok: false, error: "No se pudo restaurar esa versión." };
+  }
+}
+
+/**
+ * Probar el agente sin publicar nada (botón «Probar» de `F2`).
+ *
+ * OJO CON LO QUE SE ESTÁ PROBANDO, que es la trampa de esta pantalla: el flujo
+ * arma el prompt leyendo la configuración VIGENTE EN LA BASE. No ve lo que hay
+ * escrito ahora mismo en el formulario. Editar el tono y pulsar Probar sin
+ * guardar responde con el tono anterior, y nada en la respuesta lo delataría.
+ * Por eso la UI lo dice y muestra qué versión se está probando: es más barato
+ * escribirlo que explicarlo después.
+ *
+ * No se revalida ninguna ruta porque no cambia nada: el flujo corre en modo
+ * prueba, no escribe, no usa memoria y no cuenta contra el tope diario.
+ */
+export type ResultadoAccionPrueba =
+  | { ok: true; datos: Extract<ResultadoPrueba, { estado: "ok" }>["datos"] }
+  | { ok: false; error: string };
+
+const esquemaPrueba = z
+  .string()
+  .trim()
+  .min(3, "Escribe una pregunta de al menos tres letras.")
+  .max(MAX_CARACTERES_PRUEBA, "La pregunta de prueba es demasiado larga.");
+
+export async function probar(
+  _previo: unknown,
+  formData: FormData
+): Promise<ResultadoAccionPrueba> {
+  const sesion = await requireEmpresa();
+
+  const parseado = esquemaPrueba.safeParse(formData.get("texto"));
+  if (!parseado.success) {
+    return { ok: false, error: parseado.error.issues[0]!.message };
+  }
+
+  const resultado = await probarAgente(sesion.empresaId, parseado.data);
+
+  switch (resultado.estado) {
+    case "ok":
+      return { ok: true, datos: resultado.datos };
+    case "sin-configurar":
+      return {
+        ok: false,
+        error: "La prueba todavía no está conectada. Avisa a quien administra la plataforma.",
+      };
+    case "fallo":
+      console.warn("[agente] prueba falló:", resultado.detalle);
+      return { ok: false, error: `No se pudo probar (${resultado.detalle}).` };
   }
 }

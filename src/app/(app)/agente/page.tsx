@@ -3,6 +3,7 @@ import { requireEmpresa, tenantDe } from "@/lib/session";
 import { configuracionVigente, historialConfiguraciones } from "@/lib/queries/agente";
 import FormularioAgente from "./FormularioAgente";
 import BotonRestaurar from "./BotonRestaurar";
+import PanelPrueba from "./PanelPrueba";
 import {
   Badge,
   Card,
@@ -21,33 +22,41 @@ import type { Tenant } from "@/lib/db";
 
 export const metadata = { title: "Mi agente" };
 
+/**
+ * NO se espera ninguna consulta aquí.
+ *
+ * Antes, la página hacía `await configuracionVigente(...)` antes del `return`:
+ * el navegador no recibía NADA hasta que la base respondía. Con ~130 ms por ida
+ * y vuelta, eso era medio segundo largo de pantalla en blanco tras cada clic en
+ * "Mi agente" — justo la lentitud de navegación que se notaba.
+ *
+ * Ahora la cabecera sale de inmediato y el formulario llega por su `<Suspense>`.
+ * Lo único que se pierde es poder poner el número de versión en la cabecera:
+ * eso exigiría esperar la consulta, así que la insignia se movió dentro.
+ */
 export default async function AgentePage() {
   const sesion = await requireEmpresa();
   const t = tenantDe(sesion);
-  const configuracion = await configuracionVigente(t, sesion.empresaId);
 
   return (
     <>
       <PageHeader
         titulo="Mi agente"
         descripcion="Tono y reglas de negocio. Es lo que el agente lleva puesto en cada respuesta."
-        acciones={
-          configuracion ? (
-            <Badge tono="marca">Versión {configuracion.version} vigente</Badge>
-          ) : (
-            <Badge tono="aviso">Sin configurar</Badge>
-          )
-        }
       />
 
       <div className="grid gap-5 xl:grid-cols-3">
         <div className="xl:col-span-2">
-          {/* `key` con el id de la versión vigente: al restaurar, el formulario
-              tiene que REMONTARSE para que el estado de las reglas se rehaga
-              desde la versión nueva. Sin esto, React reutiliza la instancia y
-              la lista de reglas se queda con la anterior — la restauración
-              habría ocurrido en la base pero no en la pantalla. */}
-          <FormularioAgente key={configuracion?.id ?? "nueva"} configuracion={configuracion} />
+          <Suspense
+            fallback={
+              <div className="space-y-5">
+                <Skeleton className="h-52 w-full rounded-2xl" />
+                <Skeleton className="h-72 w-full rounded-2xl" />
+              </div>
+            }
+          >
+            <Configuracion t={t} empresaId={sesion.empresaId} />
+          </Suspense>
         </div>
 
         <div className="xl:col-span-1">
@@ -58,6 +67,44 @@ export default async function AgentePage() {
         </div>
       </div>
     </>
+  );
+}
+
+async function Configuracion({ t, empresaId }: { t: Tenant; empresaId: string }) {
+  const configuracion = await configuracionVigente(t, empresaId);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm text-ink-soft">
+          {configuracion
+            ? "Guardar creará una versión nueva. La anterior se conserva."
+            : "Todavía no has configurado el agente."}
+        </p>
+        {configuracion ? (
+          <Badge tono="marca">Versión {configuracion.version} vigente</Badge>
+        ) : (
+          <Badge tono="aviso">Sin configurar</Badge>
+        )}
+      </div>
+
+      {/* `key` con el id de la versión vigente: al restaurar, el formulario
+          tiene que REMONTARSE para que el estado de las reglas se rehaga desde
+          la versión nueva. Sin esto, React reutiliza la instancia y la lista de
+          reglas se queda con la anterior — la restauración habría ocurrido en
+          la base pero no en la pantalla. */}
+      <FormularioAgente key={configuracion?.id ?? "nueva"} configuracion={configuracion} />
+
+      {/* Debajo del formulario y no al lado: se prueba lo que YA está guardado,
+          así que el orden de lectura —configuro, guardo, pruebo— es el orden
+          real de la tarea. La `key` lo reinicia al restaurar una versión: dejar
+          en pantalla la respuesta de la versión anterior sería enseñar un
+          resultado que ya no corresponde a lo que hay vigente. */}
+      <PanelPrueba
+        key={`prueba-${configuracion?.id ?? "nueva"}`}
+        version={configuracion?.version ?? null}
+      />
+    </div>
   );
 }
 

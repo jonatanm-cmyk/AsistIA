@@ -1,4 +1,5 @@
 import "server-only";
+import { explicarFalloRed, tokenAsi } from "./asi";
 
 /**
  * Aviso al flujo de ingesta.
@@ -6,9 +7,16 @@ import "server-only";
  *
  * Contrato 1 de la documentación (`F3` -> `A1`):
  *
- *   POST /webhook/asi-10-ingesta
+ *   POST /webhook/asi-10-ingesta          (probado en vivo el 13-sep-2026)
  *   cabecera  X-ASI-Token: <token>
- *   cuerpo    { empresa_id, documento_id, evento }
+ *   cuerpo    { empresa_id, documento_id, evento: "INGESTAR" }
+ *
+ *   202 {"recibido":true}  aviso aceptado; la ingesta sigue en segundo plano
+ *   400 {"motivo":...}     falta un campo, uuid mal formado, o evento != INGESTAR
+ *   403                    sin cabecera X-ASI-Token o token incorrecto
+ *
+ * El 202 NO significa ingestado: significa recibido. El resultado se lee en
+ * `documentos.estado` + `error_detalle`.
  *
  * DOS DECISIONES DE DISEÑO
  *
@@ -22,18 +30,24 @@ import "server-only";
  *    sería mentirle: pensaría que no se subió, volvería a subirlo, y el
  *    `on conflict` lo dejaría igual que estaba.
  *
- * PENDIENTE DE CONFIRMAR CON RODRI: los valores de `evento`. La documentación
- * nombra el campo pero no enumera los valores. Se mandan SUBIDO y REEMPLAZADO
- * porque es lo que el panel sabe distinguir; si `A1` espera otra cosa, se
- * cambia aquí y en ningún otro sitio.
+ * EL VALOR DE `evento` ES `INGESTAR`, Y SOLO ESE.
+ *
+ * Aquí se mandaban SUBIDO y REEMPLAZADO, inventados cuando la documentación
+ * nombraba el campo sin enumerar los valores. El documento del 13-sep del
+ * equipo de automatización lo cerró: cualquier cosa distinta de `INGESTAR`
+ * devuelve `400`. Es decir, ninguna subida habría llegado nunca a procesarse.
+ *
+ * La distinción nuevo/reemplazo no se pierde, cambia de sitio: el flujo trata
+ * las dos igual a propósito —reingesta = borrar fragmentos e insertar— así que
+ * `era_nuevo` ya solo decide QUÉ SE LE DICE AL USUARIO, no qué se manda.
  */
 
-export type EventoIngesta = "SUBIDO" | "REEMPLAZADO";
+/** Lo único que acepta el flujo. Ver la tabla de respuestas de arriba. */
+export const EVENTO_INGESTAR = "INGESTAR" as const;
 
 export interface AvisoIngesta {
   empresaId: string;
   documentoId: string;
-  evento: EventoIngesta;
 }
 
 export type ResultadoAviso =
@@ -45,9 +59,12 @@ const TIEMPO_MAXIMO_MS = 8000;
 
 export async function avisarIngesta(aviso: AvisoIngesta): Promise<ResultadoAviso> {
   const url = process.env.ASI_INGESTA_WEBHOOK_URL;
-  const token = process.env.ASI_INGESTA_TOKEN;
+  const token = tokenAsi();
 
-  if (!url) return { estado: "sin-configurar" };
+  // Sin token el flujo responde 403 SIEMPRE: mandar el POST solo serviría para
+  // ensuciar los logs de n8n y enseñarle al usuario un fallo que no es suyo.
+  // Falta media configuración, que es lo mismo que no tenerla.
+  if (!url || !token) return { estado: "sin-configurar" };
 
   try {
     // Con timeout: un webhook colgado no puede dejar al usuario mirando un
@@ -58,12 +75,12 @@ export async function avisarIngesta(aviso: AvisoIngesta): Promise<ResultadoAviso
       method: "POST",
       headers: {
         "content-type": "application/json",
-        ...(token ? { "X-ASI-Token": token } : {}),
+        "X-ASI-Token": token,
       },
       body: JSON.stringify({
         empresa_id: aviso.empresaId,
         documento_id: aviso.documentoId,
-        evento: aviso.evento,
+        evento: EVENTO_INGESTAR,
       }),
       signal: corte,
       cache: "no-store",
@@ -74,13 +91,7 @@ export async function avisarIngesta(aviso: AvisoIngesta): Promise<ResultadoAviso
     }
     return { estado: "enviado" };
   } catch (error) {
-    const detalle =
-      error instanceof Error && error.name === "TimeoutError"
-        ? `sin respuesta en ${TIEMPO_MAXIMO_MS / 1000} s`
-        : error instanceof Error
-          ? error.message
-          : String(error);
-    return { estado: "fallo", detalle };
+    return { estado: "fallo", detalle: explicarFalloRed(error, TIEMPO_MAXIMO_MS) };
   }
 }
 

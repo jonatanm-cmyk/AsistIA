@@ -29,11 +29,12 @@ const esquemaTexto = z.object({
  *
  * Tres pasos, en este orden y por esta razón:
  *
- *   1. EXTRAER EL TEXTO. El flujo de ingesta lee `documentos.texto_extraido` y
- *      nunca baja el archivo de Storage (supuesto `S4`, y comprobado en el
- *      cuerpo de `fn_ingesta_tomar`). Sin este paso el documento se queda en
- *      cola para siempre. Va primero para poder fallar ANTES de subir 20 MB
- *      que no servirían de nada.
+ *   1. EXTRAER EL TEXTO. El flujo acepta dos caminos: `texto_extraido`, o
+ *      bajarse el original de Storage y extraerlo él (habilitado el 13-sep).
+ *      Seguimos extrayendo aquí a propósito: es el camino que ya está probado
+ *      de punta a punta, y extraer ANTES de subir deja fallar un PDF escaneado
+ *      sin haber gastado 20 MB de Storage ni dejado una fila incurable.
+ *      Si algún día se quita, hay que mandar `storage_path` y nada más.
  *   2. GUARDAR EL ORIGINAL en Storage. Es la copia de respaldo y lo que se
  *      enseña si alguien quiere ver de dónde salió una respuesta.
  *   3. REGISTRAR LA FILA en `PENDIENTE` y avisar al flujo.
@@ -151,11 +152,10 @@ async function terminar(
   empresaId: string,
   caracteres?: number
 ): Promise<ResultadoAccion> {
-  const aviso = await avisarIngesta({
-    empresaId,
-    documentoId: doc.id,
-    evento: doc.era_nuevo ? "SUBIDO" : "REEMPLAZADO",
-  });
+  // `era_nuevo` NO viaja al flujo: el aviso es siempre el mismo evento
+  // (`INGESTAR`) porque para la ingesta reemplazar es borrar fragmentos e
+  // insertar, exactamente igual que la primera vez. Solo cambia el mensaje.
+  const aviso = await avisarIngesta({ empresaId, documentoId: doc.id });
 
   if (aviso.estado === "fallo") {
     console.warn("[conocimiento] aviso de ingesta falló:", aviso.detalle);
