@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { comprobarConexion, withBootstrap } from "@/lib/db";
+import { tokenAsi } from "@/lib/asi";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +50,40 @@ function pistaSegunError(error: string): string {
   );
 }
 
+/**
+ * Estado de los dos webhooks de n8n, SIN revelar nada.
+ *
+ * POR QUÉ ESTÁ AQUÍ
+ *
+ * Si falta la URL o el token, `avisarIngesta` no manda nada y devuelve
+ * "sin-configurar". Eso es correcto —el documento queda en `PENDIENTE`, que es
+ * recuperable— pero desde fuera es INDISTINGUIBLE de que todo vaya bien: el
+ * usuario lee "queda en cola" y se queda tranquilo mientras nada se procesa.
+ * Pasó en producción el 14-sep-2026 y costó encontrarlo precisamente por eso.
+ *
+ * Con esto, comprobar un despliegue es una petición a /api/health en vez de
+ * subir un documento y esperar a ver si pasa algo.
+ *
+ * Solo dice SI están puestas. Nunca el token, y tampoco la URL: no es secreta,
+ * pero este endpoint no pide sesión y no hay motivo para publicarla.
+ */
+function estadoIntegraciones() {
+  const token = tokenAsi() !== null;
+  const estado = (url: string | undefined) =>
+    !url && !token
+      ? "sin configurar (faltan la URL y el token)"
+      : !url
+        ? "sin configurar (falta la URL)"
+        : !token
+          ? "sin configurar (falta el token)"
+          : "configurada";
+
+  return {
+    ingesta: estado(process.env.ASI_INGESTA_WEBHOOK_URL),
+    prueba_agente: estado(process.env.ASI_PROBAR_WEBHOOK_URL),
+  };
+}
+
 export async function GET() {
   const conexion = await comprobarConexion();
 
@@ -86,10 +121,28 @@ export async function GET() {
 
     const completo = esquema.tablas >= 16 && esquema.funciones >= 6;
 
+    const integraciones = estadoIntegraciones();
+    const avisos: string[] = [];
+
+    // No tumban el `ok`: la aplicación funciona sin ellas, solo que sin avisar
+    // a n8n. Pero tienen que verse, que es todo el problema que resuelven.
+    if (integraciones.ingesta !== "configurada") {
+      avisos.push(
+        "Los documentos que se suban quedarán en PENDIENTE sin procesar: falta configurar " +
+          "ASI_INGESTA_WEBHOOK_URL y ASI_WEBHOOK_TOKEN en ESTE entorno. Ojo: .env.local no " +
+          "se despliega, hay que ponerlas en el hosting y volver a desplegar."
+      );
+    }
+    if (integraciones.prueba_agente !== "configurada") {
+      avisos.push("El botón Probar del agente no funcionará: falta ASI_PROBAR_WEBHOOK_URL.");
+    }
+
     return NextResponse.json({
       ok: completo,
       postgres: conexion.version.split(" ").slice(0, 2).join(" "),
       esquema,
+      integraciones,
+      ...(avisos.length ? { avisos } : {}),
       ...(completo
         ? {}
         : {

@@ -101,7 +101,12 @@ export function explicarAviso(resultado: ResultadoAviso): string {
     case "enviado":
       return "Se está procesando.";
     case "sin-configurar":
-      return "Queda en cola: el procesado arrancará cuando el flujo de ingesta esté conectado.";
+      // Esta frase decía "arrancará cuando el flujo de ingesta esté conectado",
+      // y era cierta en agosto, cuando el flujo no existía. Desde el 13-sep sí
+      // existe, así que la frase pasó a tapar una mala configuración: el
+      // usuario leía algo tranquilizador mientras sus documentos no se
+      // procesaban. Ahora dice que hay algo que arreglar, y a quién decírselo.
+      return "Queda en cola, pero este panel no está configurado para avisar al procesador. Díselo a quien administra la plataforma.";
     case "fallo":
       return `Queda en cola, pero no se pudo avisar al procesador (${resultado.detalle}).`;
   }
