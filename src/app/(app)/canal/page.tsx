@@ -1,7 +1,10 @@
 import { Phone } from "lucide-react";
+import { notFound } from "next/navigation";
 import { requireEmpresa, tenantDe } from "@/lib/session";
 import { listarCanales } from "@/lib/queries/canal";
+import { obtenerEmpresa } from "@/lib/queries/empresas";
 import FormularioCanal from "./FormularioCanal";
+import FormularioConexion from "./FormularioConexion";
 import { Alerta, Card, CardHeader, EmptyState, EstadoBadge, PageHeader } from "@/components/ui";
 import { fechaHora } from "@/lib/format";
 import { EMPRESA_EDITA_CANAL } from "@/lib/alcance";
@@ -27,10 +30,17 @@ export const metadata = { title: "Canal de WhatsApp" };
  */
 export default async function CanalPage() {
   const sesion = await requireEmpresa();
-  const canales = await listarCanales(tenantDe(sesion), sesion.empresaId);
+  const [canales, empresa] = await Promise.all([
+    listarCanales(tenantDe(sesion), sesion.empresaId),
+    obtenerEmpresa(tenantDe(sesion), sesion.empresaId),
+  ]);
+  if (!empresa) notFound();
   // Un canal por empresa en la v1 (solo WhatsApp). Si hubiera varios, manda el
   // habilitado.
   const canal = canales.find((c) => c.estado === "HABILITADO") ?? canales[0] ?? null;
+  const baseConexion =
+    process.env.NEXT_PUBLIC_CONNECT_WHATSAPP_URL || "https://intersim.io/connect-whatsapp/";
+  const urlConexion = `${baseConexion}?client=${encodeURIComponent(empresa.client_key)}`;
 
   return (
     <>
@@ -39,6 +49,24 @@ export default async function CanalPage() {
         descripcion="El número por el que atiende tu agente."
         acciones={canal ? <EstadoBadge estado={canal.estado} /> : undefined}
       />
+
+      {canal?.estado === "HABILITADO" ? (
+        <p className="mb-5 text-sm text-ink-muted">Tu WhatsApp ya está conectado.</p>
+      ) : (
+        <Card className="mb-5">
+          <CardHeader
+            titulo="Conecta tu WhatsApp"
+            descripcion="Confirma dónde recibirás tus credenciales y qué número vas a conectar."
+          />
+          <div className="card-pad">
+            <FormularioConexion
+              correo={empresa.responsable_email}
+              numero={canal?.display_phone_number ?? ""}
+              urlConexion={urlConexion}
+            />
+          </div>
+        </Card>
+      )}
 
       <div className="grid gap-5 xl:grid-cols-3">
         <div className="xl:col-span-2">

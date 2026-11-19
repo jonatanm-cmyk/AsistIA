@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireEmpresa, tenantDe } from "@/lib/session";
-import { actualizarCanal, crearCanal } from "@/lib/queries/canal";
+import { actualizarCanal, crearCanal, guardarNumeroDeclarado } from "@/lib/queries/canal";
+import { actualizarEmpresa, obtenerEmpresa } from "@/lib/queries/empresas";
 import { ESTADOS_CANAL } from "@/types/asistia";
 
 export type ResultadoAccion = { ok: true; mensaje: string } | { ok: false; error: string };
@@ -82,5 +83,72 @@ export async function guardarCanal(
     }
     console.error("[canal] guardar", error);
     return { ok: false, error: "No se pudo guardar el canal." };
+  }
+}
+
+const errorNumero =
+  "Escribe el número con el código de país, por ejemplo +591 71234567. Puedes usar +, espacios, guiones y paréntesis.";
+
+const esquemaConexion = z.object({
+  responsable_email: z
+    .string({ invalid_type_error: "Escribe un correo válido para recibir tus credenciales." })
+    .trim()
+    .email("Escribe un correo válido para recibir tus credenciales."),
+  display_phone_number: z
+    .string({ invalid_type_error: errorNumero })
+    .trim()
+    .regex(/^\+?[\d ().-]+$/, errorNumero)
+    .transform((v) => `+${v.replace(/\D/g, "")}`)
+    // Diez dígitos como mínimo, porque ese es el piso con código de país
+    // (Bolivia: 591 + 8). Si se admitieran ocho, un «63995931» quedaría
+    // guardado como «+63995931» —otro país— y el aviso del alta compararía el
+    // número conectado contra uno que el cliente nunca quiso declarar.
+    .refine((v) => /^\+\d{10,15}$/.test(v), errorNumero),
+});
+
+/**
+ * Confirma los datos previos al alta. D12 sigue vigente: el cliente declara
+ * un número visible, pero los identificadores y la habilitación son de Intersim.
+ */
+export async function guardarConexion(
+  _previo: unknown,
+  formData: FormData
+): Promise<ResultadoAccion> {
+  const sesion = await requireEmpresa();
+  const t = tenantDe(sesion);
+  const parseado = esquemaConexion.safeParse({
+    responsable_email: formData.get("responsable_email") ?? "",
+    display_phone_number: formData.get("display_phone_number") ?? "",
+  });
+
+  if (!parseado.success) {
+    return { ok: false, error: parseado.error.issues[0]?.message ?? "Datos no válidos." };
+  }
+
+  try {
+    // Ni la empresa ni el client_key se aceptan del formulario: los dos salen
+    // de la sesión para que no se pueda preparar el alta de otra empresa.
+    const empresa = await obtenerEmpresa(t, sesion.empresaId);
+    if (!empresa) return { ok: false, error: "No se encontró tu empresa." };
+
+    const canal = await guardarNumeroDeclarado(
+      t,
+      sesion.empresaId,
+      empresa.client_key,
+      parseado.data.display_phone_number
+    );
+    if (!canal) {
+      revalidatePath("/canal");
+      return { ok: false, error: "Tu WhatsApp ya está conectado. Actualiza la página para ver su estado." };
+    }
+    await actualizarEmpresa(t, sesion.empresaId, {
+      responsable_email: parseado.data.responsable_email,
+    });
+    revalidatePath("/canal");
+    revalidatePath("/panel");
+    return { ok: true, mensaje: "Correo y número guardados. Ya puedes conectar tu WhatsApp." };
+  } catch (error) {
+    console.error("[canal] guardar conexión", error);
+    return { ok: false, error: "No se pudieron guardar tus datos. Inténtalo de nuevo." };
   }
 }

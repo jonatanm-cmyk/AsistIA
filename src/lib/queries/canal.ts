@@ -81,3 +81,48 @@ export function actualizarCanal(
     return canal;
   });
 }
+
+/**
+ * Solo declara el número; nunca cambia los ids ni el estado de un canal existente.
+ * El marcador inicial permite preparar el alta sin inventar un id de Meta.
+ */
+export function guardarNumeroDeclarado(
+  t: Tenant,
+  empresaId: string,
+  clientKey: string,
+  numero: string
+) {
+  return withTenantWrite(t, async (q) => {
+    // Bloquear la empresa serializa también el primer guardado, cuando todavía
+    // no hay una fila de canal que bloquear y dos envíos podrían duplicarla.
+    const empresa = await q.row<{ id: string }>(
+      `select id from empresas where id = $1 for update`,
+      [empresaId]
+    );
+    if (!empresa) throw new Error("Empresa no encontrada");
+
+    const canal = await q.row<Canal>(
+      `select * from canales where empresa_id = $1
+        order by (estado = 'HABILITADO') desc, creado_en desc limit 1 for update`,
+      [empresaId]
+    );
+    // El formulario puede haberse abierto antes de terminar el alta. Comprobarlo
+    // aquí evita ofrecer una reconexión que deje la bandeja con el token viejo.
+    if (canal?.estado === "HABILITADO") return null;
+
+    if (canal) {
+      return q.row<Canal>(
+        `update canales set display_phone_number = $3
+          where id = $1 and empresa_id = $2 and estado <> 'HABILITADO'
+          returning *`,
+        [canal.id, empresaId, numero]
+      );
+    }
+    return q.row<Canal>(
+      `insert into canales (empresa_id, tipo, phone_number_id, display_phone_number, estado)
+       values ($1, 'WHATSAPP', $2, $3, 'PENDIENTE')
+       returning *`,
+      [empresaId, `PENDIENTE-${clientKey}`, numero]
+    );
+  });
+}
